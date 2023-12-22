@@ -1,0 +1,82 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+
+model Father {
+  id String @id @default(uuid())
+  name String
+  username String @unique
+  password String 
+  phonenumber String
+  son Son[]
+}
+
+model Son {
+  id String @id @default(uuid())
+  name String
+  username String @unique
+  yearofbrith String
+  father_username String
+  father Father @relation(fields: [father_username], references: [username])
+  teacher_username String
+  teacher Teacher @relation(fields: [teacher_username], references: [username])
+  class_name String
+  class Class @relation(fields: [class_name], references: [name])
+  callout Callout[]
+}
+
+
+
+model Teacher {
+    id String @id @default(uuid())
+    name String
+    username String @unique
+    password String
+    class_name String
+    class Class @relation(fields: [class_name], references: [name])
+    studnets Son[]
+    callout Callout[]
+}
+
+model Class {
+  id String @id @default(uuid())
+  name String @unique
+  students Son[]
+  teacher Teacher[]
+  callout Callout[]
+}
+
+
+
+enum Status {
+  waiting
+  sendout
+  
+}
+
+model Callout {
+  name String @unique
+  son_id String
+  Son Son @relation(fields: [son_id], references: [id])
+  teacher_id String
+  teacher Teacher @relation(fields: [teacher_id], references: [id])
+  class_id String
+  class Class @relation(fields: [class_id], references: [id])
+  Status Status
+}
+
+model Admin {
+  id String @id @default(uuid())
+  name String 
+  username String @unique
+  password String
+}
