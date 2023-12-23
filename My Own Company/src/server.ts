@@ -24,11 +24,16 @@ app.post('/fatherpage/login', async (req: Request, res: Response) => {
         return res.status(401).json({ error: 'Invalid username or password' })
     }
 
-    res.cookie('tokenauth', father.id , {maxAge: 3600})
+    res.cookie('tokenauth', father.id , {maxAge: 360000})
     res.json('Login successful');
     
 });
 
+
+app.get('/fatherpage/logout', (req: Request, res: Response) => {
+    res.clearCookie('tokenauth')
+    res.json('Logout successful');
+})
 
 
 app.post('/createFather', async (req: Request, res: Response) => {
@@ -57,6 +62,23 @@ app.get('/bringmysonout/:sonId', async (req, res) => {
         return res.status(401).json('Invalid token')
     }
     const { sonId } = req.params;
+    const father_username = await prisma.father.findUnique({
+        where: { id: req.cookies.tokenauth },
+        select: { username: true },
+    })
+
+    console.log(father_username?.username);
+    
+
+    const isSonConnectedToFather = await prisma.son.findUnique({
+        where: {
+            id: sonId,
+            father_username: father_username?.username,
+        },
+    });
+    if (!isSonConnectedToFather) {
+        return res.status(401).json('you are not the father of this son')
+    }
     const son = await prisma.son.findMany({
         where: { id: sonId },
         include: { father: true, teacher: true, class: true },
@@ -80,19 +102,45 @@ app.get('/bringmysonout/:sonId', async (req, res) => {
                 connect: { username: son[0].teacher.username },
             },
             class: {
-                connect: { name: son[0].class_name },
+                connect: { name: son[0].class_name || undefined },
             },
             Status: "waiting",
         },
     });
 
-    res.json(father);
+    res.json("done");
 });
 
 
 app.delete('/recive/:name', async (req, res) => {
     const { name } = req.params;
+    if (req.cookies.tokenauth) {
+        const tokenauth = req.cookies.tokenauth;
+        const admin = await prisma.father.findMany({
+            where: { id: tokenauth },
+        });
+        console.log(admin);
+        if (admin.length === 0) {
+            return res.status(401).json('Invalid token')
+        }   
+    }
+    else{
+        return res.status(401).json('Invalid token')
+    }
+    const father_username = await prisma.father.findUnique({
+        where: { id: req.cookies.tokenauth },
+        select: { username: true },
+    })
 
+    console.log(father_username?.username);
+    
+    const check = await prisma.callout.findUnique({
+        where: { name: name },
+    })
+    if (!check) {
+        return res.status(404).json('Callout not found');
+    }
+    
     const deletedCallout = await prisma.callout.delete({
         where: { name: name },
     });
@@ -210,6 +258,10 @@ app.post('/admin/login', async (req: Request, res: Response) => {
     res.json('Login successful');
 })
 
+app.get('/admin/logout', async (req: Request, res: Response) => {
+    res.clearCookie('tokenauth')
+    res.json('Logout successful');
+})
 
 app.get('/getallteachers', async (req: Request, res: Response) => {
     if (req.cookies.tokenauth) {
@@ -306,30 +358,53 @@ app.post('/createteacher', async (req: Request, res: Response) => {
     res.json("done")
 })
 
-
+app.get('/getallsons', async (req: Request, res: Response) => {
+    if (req.cookies.tokenauth) {
+        const tokenauth = req.cookies.tokenauth;
+        const admin = await prisma.admin.findMany({
+            where: { id: tokenauth },
+        });
+        console.log(admin);
+        if (admin.length === 0) {
+            return res.status(401).json({ error: 'Invalid token' })
+        }   
+    }
+    else{
+        return res.status(401).json({ error: 'Invalid token' })
+    }
+    const sons = await prisma.son.findMany()
+    res.json(sons)
+})
 // son requests
 
 app.post('/createson', async (req: Request, res: Response) => {
-    const { name, yearofbrith, father_username , username } = req.body;
-
+    if (req.cookies.tokenauth) {
+        const tokenauth = req.cookies.tokenauth;
+        const admin = await prisma.father.findMany({
+            where: { id: tokenauth },
+        });
+        console.log(admin);
+        if (admin.length === 0) {
+            return res.status(401).json('Invalid token' )
+        }   
+    }
+    else{
+        return res.status(401).json('Invalid token')
+    }
+    const NewSon = req.body as Son;
+    await prisma.son.create({
+        data: NewSon
+    })
+    res.json("done")
+    const data = req.body as Son;
     const newStudent = await prisma.son.create({
-        data: {
-            name,
-            yearofbrith,
-            username,
-            father: { connect: { username: father_username } },
-            teacher: { connect: { username: "null" } },
-            class: { connect: { name: "null" } },
-        }
+        data: data
     });
     res.json(newStudent);
 })
 
 
-app.get('/getallsons', async (req: Request, res: Response) => {
-    const sons = await prisma.son.findMany()
-    res.json(sons)
-})
+
 
 // Teacher requests
 
@@ -348,6 +423,12 @@ app.post('/teacher/login', async (req: Request, res: Response) => {
     res.cookie('tokenauth', teacher.id, {maxAge: 360000})
     res.json('Login successful');
 })
+
+app.get('/teacher/logout', async (req: Request, res: Response) => {
+    res.clearCookie('tokenauth')
+    res.json('Logout successful');
+})
+
 
 app.get('/getmycallouts', async (req: Request, res: Response) => {
     if (req.cookies.tokenauth) {
@@ -387,7 +468,13 @@ app.put('/updateCalloutStatus/:calloutname', async (req: Request, res: Response)
         return res.status(401).json({ error: 'Invalid token' })
     }
     const { calloutname } = req.params;
-    
+    const check = await prisma.callout.findUnique({
+        where: { name: calloutname },
+    })
+    if (!check) {
+        return res.status(404).json('Callout not found');
+    }
+
     const updatedCallout = await prisma.callout.update({
         where: { name: calloutname },
         data: {
@@ -395,7 +482,7 @@ app.put('/updateCalloutStatus/:calloutname', async (req: Request, res: Response)
         },
     });
 
-    res.json(updatedCallout);
+    res.json("done")
 });
 
 
@@ -423,7 +510,7 @@ app.put('/updatestudent/:studentusername', async (req: Request, res: Response) =
         },
     });
 
-    res.json(updatedStudent)
+    res.json("done")
 });
 
 connectDB()

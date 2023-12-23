@@ -27,10 +27,10 @@ model Son {
   yearofbrith String
   father_username String
   father Father @relation(fields: [father_username], references: [username])
-  teacher_username String
-  teacher Teacher @relation(fields: [teacher_username], references: [username])
-  class_name String
-  class Class @relation(fields: [class_name], references: [name])
+  teacher_username String?
+  teacher Teacher? @relation(fields: [teacher_username], references: [username])
+  class_name String?
+  class Class? @relation(fields: [class_name], references: [name])
   callout Callout[]
 }
 
