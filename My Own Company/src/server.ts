@@ -1,7 +1,8 @@
 import express, { Request, Response } from 'express'
 import { connectDB, prisma } from "./config/db";
-import {Father , Son , Teacher , Class , Callout, Admin, Prisma, } from '@prisma/client';
+import {Father , Son , Teacher , Class , Callout, Admin, Roles, } from '@prisma/client';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import { allow } from './verify';
 var cookieParser = require('cookie-parser')
 
 
@@ -11,64 +12,64 @@ app.use(cookieParser())
 
 const PORT = 7999;
 
-// Father requests
+app.post('/login', async (req: Request, res: Response) => {
+    const { username , password } = req.body;
 
-app.post('/fatherpage/login', async (req: Request, res: Response) => {
-    const { username, password } = req.body;
+    const Role = await prisma.roles.findUnique({
+        where : { username : username }
+    })
 
-    const father = await prisma.father.findUnique({
-        where: { username: username },
-    });
-
-    if (!father || father.password !== password) {
-        return res.status(401).json({ error: 'Invalid username or password' })
+    if (!Role || Role.password !== password) {
+        return res.status(401).json('Invalid username or password')
     }
 
-    res.cookie('tokenauth', father.id , {maxAge: 360000})
+    res.cookie('tokenauth', Role.id , {maxAge: 360000})
     res.json('Login successful');
-    
-});
+})
 
 
-app.get('/fatherpage/logout', (req: Request, res: Response) => {
+app.get('/logout', async (req: Request, res: Response) => {
     res.clearCookie('tokenauth')
     res.json('Logout successful');
 })
 
+// Father requests
+
+
 
 app.post('/createFather', async (req: Request, res: Response) => {
     const NewFather = req.body as Father;
-    await prisma.father.create({
-        data: NewFather
-    })
-    res.json("done")
+    try {
+        const data = await prisma.father.create({
+            data: NewFather
+        })
+        await prisma.roles.create({
+            data : {
+                id: data.id,
+                Role: "Father",
+                username : NewFather.username,
+                password : NewFather.password
+            }
+        })
+        res.json("done")
+    }
+    catch (error: any) {
+        if (error.meta?.target === 'Callout_name_key') {
+            return res.status(400).json('Callout name already exists');
+        }
+    }
+    
 })
 
 
 
 
-app.get('/bringmysonout/:sonId', async (req, res) => {
-    if (req.cookies.tokenauth) {
-        const tokenauth = req.cookies.tokenauth;
-        const admin = await prisma.father.findMany({
-            where: { id: tokenauth },
-        });
-        console.log(admin);
-        if (admin.length === 0) {
-            return res.status(401).json('Invalid token')
-        }   
-    }
-    else{
-        return res.status(401).json('Invalid token')
-    }
+app.get('/bringmysonout/:sonId', allow(['Father' , 'Admin']) ,async (req, res) => {
     const { sonId } = req.params;
     const father_username = await prisma.father.findUnique({
         where: { id: req.cookies.tokenauth },
         select: { username: true },
     })
-
-    console.log(father_username?.username);
-    
 
     const isSonConnectedToFather = await prisma.son.findUnique({
         where: {
@@ -91,7 +92,12 @@ app.get('/bringmysonout/:sonId', async (req, res) => {
     if (!son[0].teacher || !son[0].teacher.username) {
         return res.status(400).json('Teacher information missing for the son.');
     }
-
+    const check = await prisma.callout.findMany({
+        where : { son_id : sonId}
+    })
+    if (check.length > 0) {
+        return res.status(400).json('This son is already registered to a callout');
+    }
     const father = await prisma.callout.create({
         data: {
             name: son[0].name,
@@ -107,32 +113,19 @@ app.get('/bringmysonout/:sonId', async (req, res) => {
             Status: "waiting",
         },
     });
+    
 
-    res.json("done");
+    res.json("done")
 });
 
 
-app.delete('/recive/:name', async (req, res) => {
+app.delete('/recive/:name', allow(['Father']) ,async (req, res) => {
     const { name } = req.params;
-    if (req.cookies.tokenauth) {
-        const tokenauth = req.cookies.tokenauth;
-        const admin = await prisma.father.findMany({
-            where: { id: tokenauth },
-        });
-        console.log(admin);
-        if (admin.length === 0) {
-            return res.status(401).json('Invalid token')
-        }   
-    }
-    else{
-        return res.status(401).json('Invalid token')
-    }
     const father_username = await prisma.father.findUnique({
         where: { id: req.cookies.tokenauth },
         select: { username: true },
     })
 
-    console.log(father_username?.username);
     
     const check = await prisma.callout.findUnique({
         where: { name: name },
@@ -151,20 +144,7 @@ app.delete('/recive/:name', async (req, res) => {
 
 // admin requests
 
-app.get('/getallCallouts', async (req: Request, res: Response) => {
-    if (req.cookies.tokenauth) {
-        const tokenauth = req.cookies.tokenauth;
-        const admin = await prisma.admin.findMany({
-            where: { id: tokenauth },
-        });
-        console.log(admin);
-        if (admin.length === 0) {
-            return res.status(401).json({ error: 'Invalid token' })
-        }   
-    }
-    else{
-        return res.status(401).json({ error: 'Invalid token' })
-    }
+app.get('/getallCallouts', allow(['Admin']),async (req: Request, res: Response) => {
     const all = await prisma.callout.findMany()
     res.json(all)
 })
@@ -175,13 +155,12 @@ app.get('/getallFathers', async (req: Request, res: Response) => {
         const admin = await prisma.admin.findMany({
             where: { id: tokenauth },
         });
-        console.log(admin);
         if (admin.length === 0) {
-            return res.status(401).json({ error: 'Invalid token' })
+            return res.status(401).json('Invalid token')
         }   
     }
     else{
-        return res.status(401).json({ error: 'Invalid token' })
+        return res.status(401).json('Invalid token' )
     }
 
     const fathers = await prisma.father.findMany({
@@ -203,80 +182,37 @@ app.get('/getallFathers', async (req: Request, res: Response) => {
 })
 
 
-app.post('/createAdmin', async (req: Request, res: Response) => {
-    if (req.cookies.tokenauth) {
-        const tokenauth = req.cookies.tokenauth;
-        const admin = await prisma.admin.findMany({
-            where: { id: tokenauth },
-        });
-        console.log(admin);
-        if (admin.length === 0) {
-            return res.status(401).json({ error: 'Invalid token' })
-        }   
-    }
-    else{
-        return res.status(401).json({ error: 'Invalid token' })
-    }
+app.post('/createAdmin',allow(['Admin']), async (req: Request, res: Response) => {
     const NewAdmin = req.body as Admin;
-    await prisma.admin.create({
+    let check = await prisma.admin.findMany({
+        where : { username : NewAdmin.username }
+    })
+    if (check.length > 0) {
+        return res.status(400).json('Username already exists');
+    }
+    const data = await prisma.admin.create({
         data: NewAdmin
+    })
+    await prisma.roles.create({
+        data : {
+            id : data.id,
+            Role: "Admin",
+            username: NewAdmin.username,
+            password: NewAdmin.password
+        }
     })
     res.json("done")
 })
 
-app.get('/getallAdmins', async (req: Request, res: Response) => {
-    if (req.cookies.tokenauth) {
-        const tokenauth = req.cookies.tokenauth;
-        const admin = await prisma.admin.findMany({
-            where: { id: tokenauth },
-        });
-        console.log(admin);
-        if (admin.length === 0) {
-            return res.status(401).json({ error: 'Invalid token' })
-        }   
-    }
-    else{
-        return res.status(401).json({ error: 'Invalid token' })
-    }
+app.get('/getallAdmins',allow(['Admin']), async (req: Request, res: Response) => {
 
     const admins = await prisma.admin.findMany()
     res.json(admins)
 })
 
-app.post('/admin/login', async (req: Request, res: Response) => {
-    const { username, password } = req.body;
 
-    const admin = await prisma.admin.findUnique({
-        where: { username: username },
-    });
 
-    if (!admin || admin.password!== password) {
-        return res.status(401).json({ error: 'Invalid username or password' })
-    }
-
-    res.cookie('tokenauth', admin.id, {maxAge: 360000})
-    res.json('Login successful');
-})
-
-app.get('/admin/logout', async (req: Request, res: Response) => {
-    res.clearCookie('tokenauth')
-    res.json('Logout successful');
-})
-
-app.get('/getallteachers', async (req: Request, res: Response) => {
-    if (req.cookies.tokenauth) {
-        const tokenauth = req.cookies.tokenauth;
-        const admin = await prisma.admin.findMany({
-            where: { id: tokenauth },
-        });
-        console.log(admin);
-        if (admin.length === 0) {
-            return res.status(401).json({ error: 'Invalid token' })
-        }   
-    }
-    else{
-        return res.status(401).json({ error: 'Invalid token' })
-    }
+app.get('/getallteachers', allow(['Admin']) ,async (req: Request, res: Response) => {
     const teachers = await prisma.teacher.findMany({
         select:{
             id:true,
@@ -290,20 +226,7 @@ app.get('/getallteachers', async (req: Request, res: Response) => {
 })
 
 
-app.post('/createclass', async (req: Request, res: Response) => {
-    if (req.cookies.tokenauth) {
-        const tokenauth = req.cookies.tokenauth;
-        const admin = await prisma.admin.findMany({
-            where: { id: tokenauth },
-        });
-        console.log(admin);
-        if (admin.length === 0) {
-            return res.status(401).json({ error: 'Invalid token' })
-        }   
-    }
-    else{
-        return res.status(401).json({ error: 'Invalid token' })
-    }
+app.post('/createclass', allow(['Admin']) , async (req: Request, res: Response) => {
     const NewClass = req.body as Class;
     await prisma.class.create({
         data: NewClass
@@ -311,20 +234,7 @@ app.post('/createclass', async (req: Request, res: Response) => {
     res.json("done")
 })
 
-app.get('/getallclasses', async (req: Request, res: Response) => {
-    if (req.cookies.tokenauth) {
-        const tokenauth = req.cookies.tokenauth;
-        const admin = await prisma.admin.findMany({
-            where: { id: tokenauth },
-        });
-        console.log(admin);
-        if (admin.length === 0) {
-            return res.status(401).json({ error: 'Invalid token' })
-        }   
-    }
-    else{
-        return res.status(401).json({ error: 'Invalid token' })
-    }
+app.get('/getallclasses',allow(['Admin']), async (req: Request, res: Response) => {
     const classes = await prisma.class.findMany({
         select:{
             id:true,
@@ -337,70 +247,62 @@ app.get('/getallclasses', async (req: Request, res: Response) => {
 })
 
 
-app.post('/createteacher', async (req: Request, res: Response) => {
-    if (req.cookies.tokenauth) {
-        const tokenauth = req.cookies.tokenauth;
-        const admin = await prisma.admin.findMany({
-            where: { id: tokenauth },
-        });
-        console.log(admin);
-        if (admin.length === 0) {
-            return res.status(401).json({ error: 'Invalid token' })
-        }   
-    }
-    else{
-        return res.status(401).json({ error: 'Invalid token' })
-    }
+app.post('/createteacher', allow(['Admin']) , async (req: Request, res: Response) => {
     const NewTeacher = req.body as Teacher;
-    await prisma.teacher.create({
+    
+    let check = await prisma.teacher.findMany({
+        where: { username: NewTeacher.name }
+    })
+    if (check.length > 0) {
+        return res.status(400).json('This teacher username already exists');
+    }
+    const data = await prisma.teacher.create({
         data: NewTeacher
     })
+    await prisma.roles.create({
+        data : {
+            id : data.id,
+            Role : "Teacher",
+            username : NewTeacher.username,
+            password : NewTeacher.password,
+        }
+    })
+
+
     res.json("done")
 })
 
-app.get('/getallsons', async (req: Request, res: Response) => {
-    if (req.cookies.tokenauth) {
-        const tokenauth = req.cookies.tokenauth;
-        const admin = await prisma.admin.findMany({
-            where: { id: tokenauth },
-        });
-        console.log(admin);
-        if (admin.length === 0) {
-            return res.status(401).json({ error: 'Invalid token' })
-        }   
-    }
-    else{
-        return res.status(401).json({ error: 'Invalid token' })
-    }
+app.get('/getallsons', allow(['Admin']) ,async (req: Request, res: Response) => {
     const sons = await prisma.son.findMany()
     res.json(sons)
 })
+
 // son requests
 
-app.post('/createson', async (req: Request, res: Response) => {
-    if (req.cookies.tokenauth) {
-        const tokenauth = req.cookies.tokenauth;
-        const admin = await prisma.father.findMany({
-            where: { id: tokenauth },
-        });
-        console.log(admin);
-        if (admin.length === 0) {
-            return res.status(401).json('Invalid token' )
-        }   
-    }
-    else{
-        return res.status(401).json('Invalid token')
-    }
-    const NewSon = req.body as Son;
-    await prisma.son.create({
-        data: NewSon
-    })
-    res.json("done")
-    const data = req.body as Son;
-    const newStudent = await prisma.son.create({
-        data: data
+app.post('/createson', allow(['Father']),async (req: Request, res: Response) => {
+    const tokenauth = req.cookies.tokenauth;
+    const father = await prisma.father.findMany({
+        where: { id: tokenauth },
     });
-    res.json(newStudent);
+    const {name , username , yearofbrith} = req.body;
+    let check = await prisma.son.findMany({
+        where : { username : username}
+    })
+    if (check.length > 0) {
+        return res.status(400).json('This son username already exists');
+    }
+    let father_username = father[0].username;
+    await prisma.son.create({
+        data: {
+            name: name,
+            username: username,
+            yearofbrith: yearofbrith,
+            father_username: father_username
+        }
+    })
+
+
+    res.json("done")
 })
 
 
@@ -409,41 +311,11 @@ app.post('/createson', async (req: Request, res: Response) => {
 // Teacher requests
 
 
-app.post('/teacher/login', async (req: Request, res: Response) => {
-    const { username, password } = req.body
-
-    const teacher = await prisma.teacher.findUnique({
-        where: { username : username },
-    });
-
-    if (!teacher || teacher.password!== password) {
-        return res.status(401).json({ error: 'Invalid username or password' })
-    }
-
-    res.cookie('tokenauth', teacher.id, {maxAge: 360000})
-    res.json('Login successful');
-})
-
-app.get('/teacher/logout', async (req: Request, res: Response) => {
-    res.clearCookie('tokenauth')
-    res.json('Logout successful');
-})
 
 
-app.get('/getmycallouts', async (req: Request, res: Response) => {
-    if (req.cookies.tokenauth) {
-        const tokenauth = req.cookies.tokenauth;
-        const admin = await prisma.teacher.findMany({
-            where: { id: tokenauth },
-        });
-        console.log(admin);
-        if (admin.length === 0) {
-            return res.status(401).json({ error: 'Invalid token' })
-        }   
-    }
-    else{
-        return res.status(401).json({ error: 'Invalid token' })
-    }
+
+
+app.get('/getmycallouts', allow(['Teacher']),async (req: Request, res: Response) => {
     const callouts = await prisma.callout.findMany({
         where : {teacher_id: req.cookies.tokenauth},
         select:{
@@ -453,20 +325,7 @@ app.get('/getmycallouts', async (req: Request, res: Response) => {
     res.json(callouts)
 })
 
-app.put('/updateCalloutStatus/:calloutname', async (req: Request, res: Response) => {
-    if (req.cookies.tokenauth) {
-        const tokenauth = req.cookies.tokenauth;
-        const admin = await prisma.teacher.findMany({
-            where: { id: tokenauth },
-        });
-        console.log(admin);
-        if (admin.length === 0) {
-            return res.status(401).json({ error: 'Invalid token' })
-        }   
-    }
-    else{
-        return res.status(401).json({ error: 'Invalid token' })
-    }
+app.put('/updateCalloutStatus/:calloutname', allow(['Teacher']) ,async (req: Request, res: Response) => {
     const { calloutname } = req.params;
     const check = await prisma.callout.findUnique({
         where: { name: calloutname },
@@ -486,7 +345,7 @@ app.put('/updateCalloutStatus/:calloutname', async (req: Request, res: Response)
 });
 
 
-app.put('/updatestudent/:studentusername', async (req: Request, res: Response) => {
+app.put('/updatestudent/:studentusername', allow(['Teacher']) ,async (req: Request, res: Response) => {
     const { studentusername } = req.params;
 
     const teacherToken = req.cookies.tokenauth;

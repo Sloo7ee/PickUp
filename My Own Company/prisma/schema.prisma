@@ -16,7 +16,7 @@ model Father {
   name String
   username String @unique
   password String 
-  phonenumber String
+  phonenumber String @unique
   son Son[]
 }
 
@@ -77,6 +77,13 @@ model Callout {
 model Admin {
   id String @id @default(uuid())
   name String 
+  username String @unique
+  password String
+}
+
+model Roles {
+  id String @unique
+  Role String
   username String @unique
   password String
 }
