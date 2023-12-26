@@ -23,7 +23,7 @@ model Father {
 model Son {
   id String @id @default(uuid())
   name String
-  username String @unique
+  c String @unique
   yearofbrith String
   father_username String
   father Father @relation(fields: [father_username], references: [username])

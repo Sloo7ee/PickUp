@@ -3,12 +3,14 @@ import { connectDB, prisma } from "./config/db";
 import {Father , Son , Teacher , Class , Callout, Admin, Roles, } from '@prisma/client';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { allow } from './verify';
+import cors from 'cors';
 var cookieParser = require('cookie-parser')
 
 
 const app = express()
 app.use(express.json())
 app.use(cookieParser())
+app.use(cors())
 
 const PORT = 7999;
 
@@ -64,8 +66,40 @@ app.post('/createFather', async (req: Request, res: Response) => {
 
 
 
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
+    const R = 6371e3; 
+    const φ1 = lat1 * Math.PI / 180; 
+    const φ2 = lat2 * Math.PI / 180;
+    const Δφ = (lat2 - lat1) * Math.PI / 180;
+    const Δλ = (lon2 - lon1) * Math.PI / 180;
+  
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  
+    const distance = R * c;
+    return distance;
+  }
+
+  
+  
 app.get('/bringmysonout/:sonId', allow(['Father' , 'Admin']) ,async (req, res) => {
     const { sonId } = req.params;
+    const userLocation = req.body.location; 
+
+    const targetLat = 24.85387;  
+    const targetLon = 46.71298;  
+  
+    if (!userLocation) {
+      return res.status(400).json('Location data is required');
+    }
+  
+    const distance = calculateDistance(userLocation.latitude, userLocation.longitude, targetLat, targetLon);
+  
+    if (distance > 500) {
+      return res.status(403).json('It should be over a range of 500 meters to order the son');
+    }
     const father_username = await prisma.father.findUnique({
         where: { id: req.cookies.tokenauth },
         select: { username: true },
@@ -272,6 +306,20 @@ app.post('/createteacher', allow(['Admin']) , async (req: Request, res: Response
     res.json("done")
 })
 
+app.get('/sons', async (req, res) => {
+    try {
+      const fatherWithSons = await prisma.father.findMany({
+        where: {id: req.cookies.tokenauth},
+        include: { son: true },
+      });
+  
+      res.json(fatherWithSons);
+    } catch (error) {
+      console.error('Error fetching sons data:', error);
+      res.status(500).send('Internal Server Error');
+    }
+  });
+
 app.get('/getallsons', allow(['Admin']) ,async (req: Request, res: Response) => {
     const sons = await prisma.son.findMany()
     res.json(sons)
@@ -371,6 +419,7 @@ app.put('/updatestudent/:studentusername', allow(['Teacher']) ,async (req: Reque
 
     res.json("done")
 });
+
 
 connectDB()
 app.listen(PORT, () => {
