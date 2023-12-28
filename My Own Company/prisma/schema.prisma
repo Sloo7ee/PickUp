@@ -1,16 +1,13 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "mysql"
-  url      = env("DATABASE_URL")
+  url = env("DATABASE_URL")
+  relationMode = "prisma"
 }
-
-
+  
 model Father {
   id String @id @default(uuid())
   name String
@@ -18,12 +15,13 @@ model Father {
   password String 
   phonenumber String @unique
   son Son[]
+  role Role
 }
 
 model Son {
   id String @id @default(uuid())
   name String
-  c String @unique
+  username String 
   yearofbrith String
   father_username String
   father Father @relation(fields: [father_username], references: [username])
@@ -32,6 +30,11 @@ model Son {
   class_name String?
   class Class? @relation(fields: [class_name], references: [name])
   callout Callout[]
+  role Role
+
+  @@index([father_username])
+  @@index([teacher_username])
+  @@index([class_name])
 }
 
 
@@ -43,14 +46,18 @@ model Teacher {
     password String
     class_name String
     class Class @relation(fields: [class_name], references: [name])
+    role Role
     studnets Son[]
     callout Callout[]
+
+    @@index([class_name])
 }
 
 model Class {
   id String @id @default(uuid())
   name String @unique
   students Son[]
+ 
   teacher Teacher[]
   callout Callout[]
 }
@@ -72,18 +79,24 @@ model Callout {
   class_id String
   class Class @relation(fields: [class_id], references: [id])
   Status Status
+  role Role
+
+  @@index([son_id])
+  @@index([teacher_id])
+  @@index([class_id])
 }
+
 
 model Admin {
   id String @id @default(uuid())
   name String 
   username String @unique
+  role Role
   password String
 }
-
-model Roles {
-  id String @unique
-  Role String
-  username String @unique
-  password String
+enum Role {
+  FATHER
+  SON
+  TEACHER
+  ADMIN
 }
